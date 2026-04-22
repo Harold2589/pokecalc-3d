@@ -962,41 +962,55 @@ var CATALOG_DEFAULT = [
 // ═══════════════════════════════════════════════════════
 function loadCatalogFromFirebase(callback) {
   showLoadingState(true);
-  db.collection(COLLECTION).get()
-    .then(function(snapshot) {
-      if (snapshot.empty) {
-        // Primera vez: subir datos por defecto a Firebase
-        seedDefaultData(callback);
-      } else {
-        CATALOG = [];
-        snapshot.forEach(function(doc) {
-          var d = doc.data();
-          CATALOG.push({
-            _id:       doc.id,
-            name:      d.name,
-            emoji:     d.emoji,
-            peso:      d.peso,
-            tiempo:    d.tiempo,
-            mo:        d.mo || 30,
-            empaque:   d.empaque,
-            desp:      d.desp || 0,
-            fallos:    d.fallos || 5,
-            precioFijo: d.precioFijo !== undefined ? d.precioFijo : null,
-            orden:     d.orden || 0
-          });
-        });
-        showLoadingState(false);
-        if (callback) callback();
-      }
-    })
-    .catch(function(err) {
-      console.error('Error cargando catálogo:', err);
-      // Fallback a datos locales si no hay conexión
-      CATALOG = CATALOG_DEFAULT.slice();
-      showLoadingState(false);
-      showToast('⚠️ Sin conexión — usando datos locales', 'warn');
-      if (callback) callback();
-    });
+
+  function done() {
+    showLoadingState(false);
+    if (callback) { try { callback(); } catch(e) { console.error(e); } }
+  }
+
+  try {
+    db.collection(COLLECTION).get()
+      .then(function(snapshot) {
+        try {
+          if (snapshot.empty) {
+            seedDefaultData(callback);
+          } else {
+            CATALOG = [];
+            snapshot.forEach(function(doc) {
+              var d = doc.data();
+              CATALOG.push({
+                _id:        doc.id,
+                name:       d.name      || '',
+                emoji:      d.emoji     || '🔴',
+                peso:       d.peso      || 0,
+                tiempo:     d.tiempo    || 0,
+                mo:         d.mo        || 30,
+                empaque:    d.empaque   || 1.15,
+                desp:       d.desp      || 0,
+                fallos:     d.fallos    || 5,
+                precioFijo: (d.precioFijo !== undefined && d.precioFijo !== null) ? d.precioFijo : null,
+                orden:      d.orden     || 0
+              });
+            });
+            done();
+          }
+        } catch(innerErr) {
+          console.error('Error procesando datos:', innerErr);
+          CATALOG = CATALOG_DEFAULT.slice();
+          done();
+        }
+      })
+      .catch(function(err) {
+        console.error('Error Firestore:', err);
+        CATALOG = CATALOG_DEFAULT.slice();
+        showToast('Sin conexion — usando datos locales', 'warn');
+        done();
+      });
+  } catch(e) {
+    console.error('Error iniciando carga:', e);
+    CATALOG = CATALOG_DEFAULT.slice();
+    done();
+  }
 }
 
 function seedDefaultData(callback) {
@@ -1080,7 +1094,14 @@ function deleteModelFromFirebase(docId, callback) {
 // ═══════════════════════════════════════════════════════
 function showLoadingState(show) {
   var el = document.getElementById('loading-overlay');
-  if (el) el.style.display = show ? 'flex' : 'none';
+  if (!el) return;
+  if (show) {
+    el.style.display = 'flex';
+  } else {
+    el.style.opacity = '0';
+    el.style.transition = 'opacity 0.4s';
+    setTimeout(function() { el.style.display = 'none'; el.style.opacity = '1'; }, 420);
+  }
 }
 
 function showToast(msg, type) {
@@ -1504,7 +1525,15 @@ function switchTab(tab) {
 // INIT
 // ═══════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
+  // Safety: hide overlay after 8s no matter what
+  var safetyTimer = setTimeout(function() {
+    showLoadingState(false);
+    calcular();
+  }, 8000);
+
   loadCatalogFromFirebase(function() {
+    clearTimeout(safetyTimer);
+    showLoadingState(false);
     calcular();
     renderCatalog();
     renderSummary();
